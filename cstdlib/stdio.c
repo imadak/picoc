@@ -4,6 +4,55 @@
 #include <errno.h>
 #include "../interpreter.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include "../picoc.h"
+#define MAXLN 1000
+
+#define WAIT_FOR_INPUT  -2
+EM_JS(int, em_getchar_sync, (), {
+    return Module.getChar();
+});
+
+int em_getchar(Picoc *pc) {
+    int rval;
+    while (1) {
+        rval = em_getchar_sync();
+        if (rval != WAIT_FOR_INPUT)  {
+            return rval;
+        } else {
+            emscripten_sleep_pc_with_intervals(pc, 100);
+        }
+    }
+}
+
+char* em_gets(Picoc *pc, char* buffer, int size, int ignoreLf) {
+
+    int pos = 0;
+    while (1) {
+        buffer[pos] =  em_getchar(pc);
+        if (buffer[pos] == '\n') {
+            if (!ignoreLf) {
+                if (pos < size - 1) pos++;
+            }
+            buffer[pos] = '\0';
+            return buffer;
+        }
+
+        if (buffer[pos] == EOF) {
+            buffer[pos] = '\0';
+            return buffer;
+        }
+        pos++;
+        if (size == pos) {
+            buffer[size - 1] = '\0';
+            return buffer;
+        }
+    }
+}
+
+#endif
+
 #define MAX_FORMAT 80
 #define MAX_SCANF_ARGS 10
 
@@ -267,7 +316,11 @@ int StdioBasePrintf(struct ParseState *Parser, FILE *Stream, char *StrOut, int S
                     if (ShowType == &pc->IntType)
                     {
                         /* show a signed integer */
+#ifdef ISO_COMPAT
+                        if (IS_NUMERIC_COERCIBLE_EX(ThisArg))
+#else
                         if (IS_NUMERIC_COERCIBLE(ThisArg))
+#endif
                             StdioFprintfWord(&SOStream, OneFormatBuf, ExpressionCoerceUnsignedInteger(ThisArg));
                         else
                             StdioOutPuts("XXX", &SOStream);
@@ -320,6 +373,7 @@ int StdioBasePrintf(struct ParseState *Parser, FILE *Stream, char *StrOut, int S
     /* null-terminate */
     if (SOStream.StrOutPtr != NULL && SOStream.StrOutLen > 0)
         *SOStream.StrOutPtr = '\0';      
+
     
     return SOStream.CharCount;
 }
@@ -330,7 +384,38 @@ int StdioBaseScanf(struct ParseState *Parser, FILE *Stream, char *StrIn, char *F
     struct Value *ThisArg = Args->Param[0];
     int ArgCount = 0;
     void *ScanfArg[MAX_SCANF_ARGS];
+
+#ifdef __EMSCRIPTEN__
+    char ScanfBuffer[1024];
+    char* FormatConv;
+    int ScanfValue = 0;
+    int FormatPos = 0;
+    int ReadCount = 0;
+    int FormatConvLen = 0;
+    int i, j = 0;
+
+    // Replace %f by %lf
+    FormatConvLen = strlen(Format);
+    for (i = 0; Format[i] != '\0'; i++) {
+        if (Format[i] == '%' && Format[i + 1] == 'f') {
+            FormatConvLen++;
+        }
+    }
+
+    FormatConv = (char*) malloc(FormatConvLen * sizeof(char) + 1);
+    if  (FormatConv == NULL) {
+        ProgramFail(Parser, "out of memory");
+    }
+
+    for (i = 0; Format[i] != '\0'; i++) {
+        FormatConv[j++] = Format[i];
+        if (Format[i] == '%' && Format[i + 1] == 'f') {
+            FormatConv[j++]  = 'l';
+        }
+    }
+    FormatConv[j] = '\0';
     
+#endif
     if (Args->NumArgs > MAX_SCANF_ARGS)
         ProgramFail(Parser, "too many arguments to scanf() - %d max", MAX_SCANF_ARGS);
     
@@ -347,11 +432,43 @@ int StdioBaseScanf(struct ParseState *Parser, FILE *Stream, char *StrIn, char *F
         else
             ProgramFail(Parser, "non-pointer argument to scanf() - argument %d after format", ArgCount+1);
     }
-    
+
+#ifdef __EMSCRIPTEN__
+    if (Stream == stdin) {
+        ArgCount = 0;
+        do {
+            fflush(stdout);
+            em_gets(Parser->pc, ScanfBuffer, 1024, 0);
+            ReadCount = sscanf(ScanfBuffer, FormatConv + FormatPos,
+                               ScanfArg[ArgCount % 10],
+                               ScanfArg[(ArgCount + 1) % 10],
+                               ScanfArg[(ArgCount + 2) % 10],
+                               ScanfArg[(ArgCount + 3) % 10],
+                               ScanfArg[(ArgCount + 4) % 10],
+                               ScanfArg[(ArgCount + 5) % 10],
+                               ScanfArg[(ArgCount + 6) % 10],
+                               ScanfArg[(ArgCount + 7) % 10],
+                               ScanfArg[(ArgCount + 8) % 10],
+                               ScanfArg[(ArgCount + 9) % 10]);
+            ArgCount += ReadCount;
+            while (0 < ReadCount) {
+                FormatPos++;
+                if (FormatConv[FormatPos] == '%') --ReadCount;
+                if (FormatConv[FormatPos] == '\0') break;
+            }
+
+        } while (FormatConv[FormatPos] != '\0') ;
+
+        free(FormatConv);
+
+        return ScanfValue;
+    }
+#else
     if (Stream != NULL)
         return fscanf(Stream, Format, ScanfArg[0], ScanfArg[1], ScanfArg[2], ScanfArg[3], ScanfArg[4], ScanfArg[5], ScanfArg[6], ScanfArg[7], ScanfArg[8], ScanfArg[9]);
     else
         return sscanf(StrIn, Format, ScanfArg[0], ScanfArg[1], ScanfArg[2], ScanfArg[3], ScanfArg[4], ScanfArg[5], ScanfArg[6], ScanfArg[7], ScanfArg[8], ScanfArg[9]);
+#endif
 }
 
 /* stdio calls */
@@ -387,7 +504,15 @@ void StdioFgetc(struct ParseState *Parser, struct Value *ReturnValue, struct Val
 
 void StdioFgets(struct ParseState *Parser, struct Value *ReturnValue, struct Value **Param, int NumArgs) 
 {
+#ifdef __EMSCRIPTEN__
+    if  (Param[2]->Val->Pointer == stdin) {
+        ReturnValue->Val->Pointer = em_gets(Parser->pc, Param[0]->Val->Pointer, Param[1]->Val->Integer, 0);
+    } else {
+        ReturnValue->Val->Pointer = fgets(Param[0]->Val->Pointer, Param[1]->Val->Integer, Param[2]->Val->Pointer);
+    }
+#else
     ReturnValue->Val->Pointer = fgets(Param[0]->Val->Pointer, Param[1]->Val->Integer, Param[2]->Val->Pointer);
+#endif
 }
 
 void StdioRemove(struct ParseState *Parser, struct Value *ReturnValue, struct Value **Param, int NumArgs) 
@@ -482,6 +607,9 @@ void StdioPutc(struct ParseState *Parser, struct Value *ReturnValue, struct Valu
 void StdioPutchar(struct ParseState *Parser, struct Value *ReturnValue, struct Value **Param, int NumArgs) 
 {
     ReturnValue->Val->Integer = putchar(Param[0]->Val->Integer);
+#ifdef __EMSCRIPTEN__
+        fflush(stdout);
+#endif
 }
 
 void StdioSetbuf(struct ParseState *Parser, struct Value *ReturnValue, struct Value **Param, int NumArgs) 
@@ -502,10 +630,17 @@ void StdioUngetc(struct ParseState *Parser, struct Value *ReturnValue, struct Va
 void StdioPuts(struct ParseState *Parser, struct Value *ReturnValue, struct Value **Param, int NumArgs) 
 {
     ReturnValue->Val->Integer = puts(Param[0]->Val->Pointer);
+#ifdef __EMSCRIPTEN__
+        fflush(stdout);
+#endif
 }
 
 void StdioGets(struct ParseState *Parser, struct Value *ReturnValue, struct Value **Param, int NumArgs) 
 {
+
+#ifdef __EMSCRIPTEN__
+    ReturnValue->Val->Pointer = em_gets(Parser->pc, Param[0]->Val->Pointer, GETS_MAXValue, 1);
+#else
     ReturnValue->Val->Pointer = fgets(Param[0]->Val->Pointer, GETS_MAXValue, stdin);
     if (ReturnValue->Val->Pointer != NULL)
     {
@@ -513,20 +648,27 @@ void StdioGets(struct ParseState *Parser, struct Value *ReturnValue, struct Valu
         if (EOLPos != NULL)
             *EOLPos = '\0';
     }
+#endif
 }
 
 void StdioGetchar(struct ParseState *Parser, struct Value *ReturnValue, struct Value **Param, int NumArgs) 
 {
+#ifdef __EMSCRIPTEN__
+    ReturnValue->Val->Integer = em_getchar(Parser->pc);
+#else
     ReturnValue->Val->Integer = getchar();
+#endif
 }
 
 void StdioPrintf(struct ParseState *Parser, struct Value *ReturnValue, struct Value **Param, int NumArgs)
 {
     struct StdVararg PrintfArgs;
-    
     PrintfArgs.Param = Param;
     PrintfArgs.NumArgs = NumArgs-1;
     ReturnValue->Val->Integer = StdioBasePrintf(Parser, stdout, NULL, 0, Param[0]->Val->Pointer, &PrintfArgs);
+#ifdef __EMSCRIPTEN__
+        fflush(stdout);
+#endif
 }
 
 void StdioVprintf(struct ParseState *Parser, struct Value *ReturnValue, struct Value **Param, int NumArgs)
@@ -684,13 +826,22 @@ void StdioSetupFunc(Picoc *pc)
     struct ValueType *FilePtrType;
 
     /* make a "struct __FILEStruct" which is the same size as a native FILE structure */
+#ifdef __EMSCRIPTEN__
+    StructFileType = TypeCreateOpaqueStruct(pc, NULL, TableStrRegister(pc, "__FILEStruct"), 300);
+#else
     StructFileType = TypeCreateOpaqueStruct(pc, NULL, TableStrRegister(pc, "__FILEStruct"), sizeof(FILE));
-    
+#endif
+
     /* get a FILE * type */
     FilePtrType = TypeGetMatching(pc, NULL, StructFileType, TypePointer, 0, pc->StrEmpty, TRUE);
 
     /* make a "struct __va_listStruct" which is the same size as our struct StdVararg */
+
+#ifdef __EMSCRIPTEN__
+    TypeCreateOpaqueStruct(pc, NULL, TableStrRegister(pc, "__va_listStruct"), 300);
+#else
     TypeCreateOpaqueStruct(pc, NULL, TableStrRegister(pc, "__va_listStruct"), sizeof(FILE));
+#endif
     
     /* define EOF equal to the system EOF */
     VariableDefinePlatformVar(pc, NULL, "EOF", &pc->IntType, (union AnyValue *)&EOFValue, FALSE);

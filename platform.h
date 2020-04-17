@@ -144,4 +144,9 @@ extern int ExitBuf[];
 # endif
 #endif
 
+#ifdef __EMSCRIPTEN__
+#undef ALIGN_TYPE
+#define ALIGN_TYPE double
+#endif
+
 #endif /* PLATFORM_H */

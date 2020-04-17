@@ -443,7 +443,11 @@ struct ValueType *TypeParseBack(struct ParseState *Parser, struct ValueType *Fro
         {
             /* an unsized array */
             LexGetToken(Parser, NULL, TRUE);
+#ifdef ISO_COMPAT
+            return TypeGetMatching(Parser->pc, Parser, TypeParseBack(Parser, FromType), TypePointer, 0, Parser->pc->StrEmpty, TRUE);
+#else
             return TypeGetMatching(Parser->pc, Parser, TypeParseBack(Parser, FromType), TypeArray, 0, Parser->pc->StrEmpty, TRUE);
+#endif
         }
         else
         {

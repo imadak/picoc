@@ -174,6 +174,10 @@ long ExpressionCoerceInteger(struct Value *Val)
         case TypeUnsignedLong:    return (long)Val->Val->UnsignedLongInteger;
         case TypeUnsignedChar:    return (long)Val->Val->UnsignedCharacter;
         case TypePointer:         return (long)Val->Val->Pointer;
+#ifdef ISO_COMPAT
+        case TypeArray:           return (long) &Val->Val->ArrayMem[0];
+#endif
+
 #ifndef NO_FP
         case TypeFP:              return (long)Val->Val->FP;
 #endif
@@ -194,6 +198,11 @@ unsigned long ExpressionCoerceUnsignedInteger(struct Value *Val)
         case TypeUnsignedLong:    return (unsigned long)Val->Val->UnsignedLongInteger;
         case TypeUnsignedChar:    return (unsigned long)Val->Val->UnsignedCharacter;
         case TypePointer:         return (unsigned long)Val->Val->Pointer;
+
+#ifdef ISO_COMPAT
+        case TypeArray:           return (unsigned long) &Val->Val->ArrayMem[0];
+#endif
+
 #ifndef NO_FP
         case TypeFP:              return (unsigned long)Val->Val->FP;
 #endif
@@ -590,13 +599,18 @@ void ExpressionPrefixOperator(struct ParseState *Parser, struct ExpressionStack 
                 int Size = TypeSize(TopValue->Typ->FromType, 0, TRUE);
                 struct Value *StackValue;
                 void *ResultPtr;
-
+#ifndef ISO_COMPAT
                 if (TopValue->Val->Pointer == NULL)
                     ProgramFail(Parser, "invalid use of a NULL pointer");
-                
+#endif
                 if (!TopValue->IsLValue) 
                     ProgramFail(Parser, "can't assign to this"); 
                     
+#ifdef ISO_COMPAT
+                if (Op == TokenUnaryNot)
+                    ExpressionPushInt(Parser, StackTop, !TopValue->Val->Pointer);
+                else {
+#endif
                 switch (Op)
                 {
                     case TokenIncrement:    TopValue->Val->Pointer = (void *)((char *)TopValue->Val->Pointer + Size); break;
@@ -607,6 +621,9 @@ void ExpressionPrefixOperator(struct ParseState *Parser, struct ExpressionStack 
                 ResultPtr = TopValue->Val->Pointer;
                 StackValue = ExpressionStackPushValueByType(Parser, StackTop, TopValue->Typ);
                 StackValue->Val->Pointer = ResultPtr;
+#ifdef ISO_COMPAT
+                }
+#endif
             }
             else
                 ProgramFail(Parser, "invalid operation");
@@ -657,9 +674,11 @@ void ExpressionPostfixOperator(struct ParseState *Parser, struct ExpressionStack
         struct Value *StackValue;
         void *OrigPointer = TopValue->Val->Pointer;
         
+#ifndef ISO_COMPAT
         if (TopValue->Val->Pointer == NULL)
             ProgramFail(Parser, "invalid use of a NULL pointer");
-            
+
+#endif
         if (!TopValue->IsLValue) 
             ProgramFail(Parser, "can't assign to this"); 
         
@@ -725,7 +744,6 @@ void ExpressionInfixOperator(struct ParseState *Parser, struct ExpressionStack *
         double ResultFP = 0.0;
         double TopFP = (TopValue->Typ == &Parser->pc->FPType) ? TopValue->Val->FP : (double)ExpressionCoerceInteger(TopValue);
         double BottomFP = (BottomValue->Typ == &Parser->pc->FPType) ? BottomValue->Val->FP : (double)ExpressionCoerceInteger(BottomValue);
-
         switch (Op)
         {
             case TokenAssign:               ASSIGN_FP_OR_INT(TopFP); break;
@@ -819,8 +837,10 @@ void ExpressionInfixOperator(struct ParseState *Parser, struct ExpressionStack *
             int Size = TypeSize(BottomValue->Typ->FromType, 0, TRUE);
             
             Pointer = BottomValue->Val->Pointer;
+#ifndef ISO_COMPAT
             if (Pointer == NULL)
                 ProgramFail(Parser, "invalid use of a NULL pointer");
+#endif
             
             if (Op == TokenPlus)
                 Pointer = (void *)((char *)Pointer + TopInt * Size);
@@ -843,8 +863,10 @@ void ExpressionInfixOperator(struct ParseState *Parser, struct ExpressionStack *
             int Size = TypeSize(BottomValue->Typ->FromType, 0, TRUE);
 
             Pointer = BottomValue->Val->Pointer;
+#ifndef ISO_COMPAT
             if (Pointer == NULL)
                 ProgramFail(Parser, "invalid use of a NULL pointer");
+#endif
 
             if (Op == TokenAddAssign)
                 Pointer = (void *)((char *)Pointer + TopInt * Size);
@@ -885,6 +907,28 @@ void ExpressionInfixOperator(struct ParseState *Parser, struct ExpressionStack *
         struct Value *ValueLoc = ExpressionStackPushValueByType(Parser, StackTop, BottomValue->Val->Typ);
         ExpressionAssign(Parser, ValueLoc, TopValue, TRUE, NULL, 0, TRUE);
     }
+#ifdef ISO_COMPAT
+    else if (BottomValue->Typ->Base == TypeArray && (Op == TokenPlus || Op == TokenMinus)) {
+        /* pointer arithmetic */
+        struct Value *Result;
+        union AnyValue* ValPtr;
+
+        long TopInt = ExpressionCoerceInteger(TopValue);
+        int Size = TypeSize(BottomValue->Typ->FromType, 0, TRUE);
+        ValPtr = (void *) &BottomValue->Val->ArrayMem[0];
+        Result = VariableAllocValueFromType(Parser->pc, Parser, TypeGetMatching(Parser->pc, Parser, BottomValue->Typ, TypePointer, 0, Parser->pc->StrEmpty, TRUE), FALSE, NULL, FALSE);
+
+        if (Op == TokenPlus) {
+            ValPtr =  (void *) ((char *)ValPtr + TopInt * Size);
+        } else {
+            ValPtr =  (void *) ((char *)ValPtr - TopInt * Size);
+        }
+
+        Result->Val->Pointer = ValPtr;
+        ExpressionStackPushValueNode(Parser, StackTop, Result);
+    }
+#endif
+
     else
         ProgramFail(Parser, "invalid operation");
 }
@@ -1547,8 +1591,15 @@ void ExpressionParseFunctionCall(struct ParseState *Parser, struct ExpressionSta
             
             if (RunIt)
             {
+
                 if (FuncParser.Mode == RunModeRun && FuncValue->Val->FuncDef.ReturnType != &Parser->pc->VoidType)
+#ifdef ISO_COMPAT
+                    if (strcmp(FuncName,"main")) {
+                        ProgramFail(&FuncParser, "no value returned from a function returning %t", FuncValue->Val->FuncDef.ReturnType);
+                    } else;
+#else
                     ProgramFail(&FuncParser, "no value returned from a function returning %t", FuncValue->Val->FuncDef.ReturnType);
+#endif
 
                 else if (FuncParser.Mode == RunModeGoto)
                     ProgramFail(&FuncParser, "couldn't find goto label '%s'", FuncParser.SearchGotoLabel);
@@ -1576,10 +1627,14 @@ long ExpressionParseInt(struct ParseState *Parser)
     
     if (Parser->Mode == RunModeRun)
     { 
+#ifdef ISO_COMPAT
+        if (!IS_NUMERIC_COERCIBLE_EX(Val))
+#else
         if (!IS_NUMERIC_COERCIBLE(Val))
+#endif
             ProgramFail(Parser, "integer value expected instead of %t", Val->Typ);
-    
         Result = ExpressionCoerceInteger(Val);
+
         VariableStackPop(Parser, Val);
     }
     

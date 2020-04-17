@@ -54,6 +54,11 @@ typedef FILE IOFILE;
 #define IS_NUMERIC_COERCIBLE(v) (IS_INTEGER_NUMERIC(v) || IS_FP(v))
 #define IS_NUMERIC_COERCIBLE_PLUS_POINTERS(v,ap) (IS_NUMERIC_COERCIBLE(v) || IS_POINTER_COERCIBLE(v,ap))
 
+#ifdef ISO_COMPAT
+#define IS_NUMERIC_COERCIBLE_EX(v) (IS_INTEGER_NUMERIC(v) || IS_FP(v) || (v)->Typ->Base == TypePointer || (v)->Typ->Base == TypeArray)
+#else
+
+#endif
 
 struct Table;
 struct Picoc_Struct;
@@ -448,9 +453,12 @@ struct Picoc_Struct
     int BigEndian;
     int LittleEndian;
 
+
     IOFILE *CStdOut;
+#ifdef BUILTIN_MINI_STDLIB
     IOFILE CStdOutBase;
 
+#endif
     /* the picoc version string */
     const char *VersionString;
     

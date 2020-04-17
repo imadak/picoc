@@ -1,8 +1,8 @@
-CC=gcc
-CFLAGS=-Wall -pedantic -g -DUNIX_HOST -DVER=\"2.1\"
-LIBS=-lm -lreadline
+CC=emcc
+CFLAGS=-s WASM=0 -s ASYNCIFY=1 -O1 -DISO_COMPAT  -Wall -pedantic -g -DUNIX_HOST -DVER=\"2.1\"
+LIBS=-lm
+TARGET	= picoc.js
 
-TARGET	= picoc
 SRCS	= picoc.c table.c lex.c parse.c expression.c heap.c type.c \
 	variable.c clibrary.c platform.c include.c debug.c \
 	platform/platform_unix.c platform/library_unix.c \

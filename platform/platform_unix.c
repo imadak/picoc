@@ -1,6 +1,31 @@
 #include "../picoc.h"
 #include "../interpreter.h"
 
+#ifdef __EMSCRIPTEN__
+#undef USE_READLINE
+
+#include <emscripten.h>
+
+EM_JS(int, em_stop, (), {
+    return Module.isInterrupted();
+});
+
+void emscripten_sleep_pc(Picoc *pc) {
+    emscripten_sleep_pc_with_intervals(pc, DEFAULT_SLEEP_INTERVAL);
+}
+void emscripten_sleep_pc_with_intervals(Picoc *pc, int interval) {
+    static int count = 0;
+    if ((count ++ % interval) == 0)  {
+        emscripten_sleep(1);
+        if (em_stop()) {
+            PlatformExit(pc, -1);
+        }
+    }
+}
+
+#endif
+
+
 #ifdef USE_READLINE
 #include <readline/readline.h>
 #include <readline/history.h>

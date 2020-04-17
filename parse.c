@@ -486,6 +486,9 @@ void ParseFor(struct ParseState *Parser)
         
     while (Condition && Parser->Mode == RunModeRun)
     {
+#ifdef __EMSCRIPTEN__
+        emscripten_sleep_pc(Parser->pc);
+#endif
         ParserCopyPos(Parser, &PreIncrement);
         ParseStatement(Parser, FALSE);
                         
@@ -692,6 +695,9 @@ enum ParseResult ParseStatement(struct ParseState *Parser, int CheckTrailingSemi
                 ParserCopyPos(&PreConditional, Parser);
                 do
                 {
+#ifdef __EMSCRIPTEN__
+                    emscripten_sleep_pc(Parser->pc);
+#endif
                     ParserCopyPos(Parser, &PreConditional);
                     Condition = ExpressionParseInt(Parser);
                     if (LexGetToken(Parser, NULL, TRUE) != TokenCloseBracket)
@@ -719,6 +725,9 @@ enum ParseResult ParseStatement(struct ParseState *Parser, int CheckTrailingSemi
                 ParserCopyPos(&PreStatement, Parser);
                 do
                 {
+#ifdef __EMSCRIPTEN__
+                    emscripten_sleep_pc(Parser->pc);
+#endif
                     ParserCopyPos(Parser, &PreStatement);
                     if (ParseStatement(Parser, TRUE) != ParseResultOk)
                         ProgramFail(Parser, "statement expected");

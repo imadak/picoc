@@ -46,4 +46,11 @@ void PicocPlatformScanFile(Picoc *pc, const char *FileName);
 /* include.c */
 void PicocIncludeAllSystemHeaders(Picoc *pc);
 
+#ifdef __EMSCRIPTEN__
+#define DEFAULT_SLEEP_INTERVAL 3000
+
+void emscripten_sleep_pc(Picoc *pc) ;
+void emscripten_sleep_pc_with_intervals(Picoc *pc, int interval);
+#endif
+
 #endif /* PICOC_H */

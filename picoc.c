@@ -11,6 +11,15 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+
+EM_JS(void, em_exit, (), {
+        Module.onExitPicoc();
+});
+
+#endif
+
 #define PICOC_STACK_SIZE (128*1024)              /* space for the the stack */
 
 int main(int argc, char **argv)
@@ -47,6 +56,11 @@ int main(int argc, char **argv)
         if (PicocPlatformSetExitPoint(&pc))
         {
             PicocCleanup(&pc);
+#ifdef __EMSCRIPTEN__
+            printf("\n");
+            fflush(stdout);
+            em_exit();
+#endif
             return pc.PicocExitValue;
         }
         
@@ -58,6 +72,11 @@ int main(int argc, char **argv)
     }
     
     PicocCleanup(&pc);
+#ifdef __EMSCRIPTEN__
+    printf("\n");
+    fflush(stdout);
+    em_exit();
+#endif
     return pc.PicocExitValue;
 }
 #else
