@@ -1,0 +1,215 @@
+<?xml version="1.0"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en"><head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /> 
+
+<title>
+Demo 
+</title>
+<script src="./lib/ace/ace.js" type="text/javascript" charset="utf-8"></script>
+<link rel="stylesheet" href="./lib/xterm/css/xterm.css" />
+<script type="text/javascript" src="./lib/xterm/lib/xterm.js"></script>
+
+<script type="text/javascript">
+//<![CDATA[
+
+
+TemplateCode = '#include <stdio.h> \n\nint main(void)\n\{\n\tint x;\n\tprintf("Input number: ");\n\tscanf("%d",&x);\n\tprintf("%d", x * x);\n\treturn 0;\n}'
+  
+<!--
+///////////////////////////////////////////////////////////////
+// Emscripten Module definition
+Module = {
+    onExitPicoc : function() {}, 
+    isInterrupted: function() {return false},
+    isInteractive: true, 
+    noInitialRun: true,
+    noExitRuntime: false,
+    stdIn : [],
+    stdOut: [],
+    preRun : function() {
+        FS.init(function() {}, Module.putChar, function() {});
+    },
+    postRun : function() {
+
+    }
+}
+
+// Standard IO functions, called by C interpreter (picoc)
+Module.getChar = function() {
+    if (Module.stdIn.includes(0xA)) {        
+        return Module.stdIn.shift();
+    } else {
+        // wait until LF ('\n') reads
+        return -2;
+    }
+}
+
+// 
+Module.putChar =  function (ch) {
+
+    var StdOut = Module.stdOut;
+    ch += (ch < 0 ? 256 : 0);
+    StdOut.push(ch);
+
+    if (!Module.isInteractive) return;
+    
+    // multi-byte Unicode character
+    if (StdOut.length == 1 && 0x7F < StdOut[0]) {
+        // wait for the next byte
+        return;
+    }
+    if (StdOut.length == 2 && 0x07FF < (StdOut[0] << 8 | StdOut[1]) ){
+        //console.log("more than 2 bytes");
+        return;
+    }
+    if (StdOut.length == 3 && 0xEFBFBF < (StdOut[0] << 16 | StdOut[1] << 8 | StdOut[2])) {
+        //console.log("more than 3 bytes");
+        return;
+    }
+    
+    // there is no letter more than 4 bytes!
+    if (StdOut.length == 1 && ch == 10) {
+        MyTerm.writeln('');
+    } else {
+        MyTerm.write(new TextDecoder().decode(new Uint8Array(StdOut)));
+    }
+    
+    Module.stdOut = [];
+};
+
+///////////////////////////////////////////////////////////////  
+// handler for 実行  button
+onExec = function() {
+    document.getElementById("terminal").style.visibility = 'visible';
+    setButtonsEnabled(true);
+    MyTerm.reset();
+    MyTerm.focus();
+
+    // obtain the content of editor
+    var editor = ace.edit("srcEditor");
+    var src = editor.getValue();
+    runMain(src, true, null, function() {setButtonsEnabled(false); MyTerm.writeln('\n《Finished》')});
+}
+
+setButtonsEnabled = function(isRunning) {
+    document.getElementById('execButton').disabled = isRunning;
+    document.getElementById('stopButton').disabled = !isRunning;
+}
+// handler for Exec button
+onStop = function() {
+    Module.isInterrupted = function() {return true};
+}
+//  handler for reset button
+onReset = function() {
+    var editor = ace.edit("srcEditor");
+    if (typeof TemplateCode  !== 'undefined') {
+        editor.setValue(TemplateCode)
+    }        
+}
+checkAnswerInBatch = function(srcCode , inputPosition, inputArray, mark, callback) {
+
+    if (inputArray.length <= inputPosition) {
+        callback(mark);
+        return
+    }
+
+    runMain(srcCode, false, inputArray[inputPosition], function(result) {
+        mark  = mark && CheckAnswer(srcCode, inputPosition, result);
+        checkAnswerInBatch(srcCode, inputPosition + 1, inputArray, mark, callback);
+    });
+}
+
+  
+// initialize text editor (Ace editor)
+initEditor = function() {
+    var editor = ace.edit("srcEditor");
+    editor.session.setMode("ace/mode/c_cpp");
+    editor.setFontSize(16);   
+
+    editor.setValue(TemplateCode);
+}
+
+// initialize terminal (Xtermjs)
+initTerm = function  () {
+
+    var term = new Terminal();
+    MyTerm = term;
+    term.open(document.getElementById('terminal'));
+    term.setOption("fontSize",14);
+   
+    if (term._initialized) {
+        return;
+    }
+
+    term._initialized = true;
+    term.onKey(e => {
+        const printable = !e.domEvent.altKey && !e.domEvent.altGraphKey && !e.domEvent.ctrlKey && !e.domEvent.metaKey;
+
+        if (e.domEvent.keyCode === 13) {
+            if (Module.isInteractive) {
+                Module.stdIn.push(0x0A)
+            }
+            term.writeln('');
+        } else if (e.domEvent.keyCode === 8) {
+            if (Module.isInteractive) {
+                Module.stdIn.pop();
+            }
+            term.write('\b \b');
+
+        } else if (printable) {
+            if (Module.isInteractive) {
+                Module.stdIn.push(e.key.charCodeAt(0));
+            }            
+            term.write(e.key);
+            
+        }
+    });
+}
+
+  
+///////////////////////////////////////////////////////////////
+runMain = function(srcCode, interactive, inputString, callback) {
+    
+    Module.isInterrupted = function() {return false};    
+    Module.isInteractive = interactive;
+    Module.stdOut = [];
+    
+    if (interactive) {        
+        Module.stdIn = [];
+
+    } else {
+        Module.stdIn = Array.from(new TextEncoder("utf-8").encode(inputString));
+        console.log(Module.stdIn);
+        setTimeout(function() {onStop()}, TestTimeoutMillis);
+    }
+
+    Module.onExitPicoc = function () {
+
+        if (callback) {
+            setTimeout(function() {callback(new TextDecoder("utf-8").decode(new Uint8Array(Module.stdOut)))}, 100);
+        }
+    }
+    
+    FS.chdir("/home/web_user/");
+    FS.writeFile("webclass.c", srcCode);
+    callMain(["webclass.c"]);
+}
+//-->
+//]]>
+</script>
+<script type="text/javascript" src="../picoc.js"></script>
+</head>
+
+<body onload="initEditor(); initTerm();" id="TheBody" >
+<div>
+  <div id="problemText" style="width:80%; margin-bottom:3em"></div>
+
+  <button onclick="onExec();" id="execButton" type="submit">Exec</button>
+  <button onclick="onStop();" id="stopButton"  type="submit">Stop</button>  
+  <div id="terminal" style="width:80%;  margin-bottom:1em" class="xterm"></div>
+  <button onclick="onReset();" id="resetButton"  type="submit">Reset Editor</button>
+  <div id="srcEditor" style="width:80%; height:50em"></div>
+</div>
+</body>
+</html>
