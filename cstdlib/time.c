@@ -14,6 +14,14 @@ static int CLK_PER_SECValue = CLK_PER_SEC;
 static int CLK_TCKValue = CLK_TCK;
 #endif
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+EM_JS(int, em_fixedtime, (), {
+    return Module.fixedtime();
+});
+
+#endif
+
 void StdAsctime(struct ParseState *Parser, struct Value *ReturnValue, struct Value **Param, int NumArgs)
 {
     ReturnValue->Val->Pointer = asctime(Param[0]->Val->Pointer);
@@ -53,11 +61,22 @@ void StdMktime(struct ParseState *Parser, struct Value *ReturnValue, struct Valu
 
 void StdTime(struct ParseState *Parser, struct Value *ReturnValue, struct Value **Param, int NumArgs)
 {
+#ifdef __EMSCRIPTEN__
+    int fixed_time_value = em_fixedtime();
+    if (fixed_time_value) {
+        ReturnValue->Val->Integer = (int)em_fixedtime();
+    } else {
+        ReturnValue->Val->Integer = (int)time(Param[0]->Val->Pointer);
+    }
+    return;
+#else
     ReturnValue->Val->Integer = (int)time(Param[0]->Val->Pointer);
+#endif
 }
 
 void StdStrftime(struct ParseState *Parser, struct Value *ReturnValue, struct Value **Param, int NumArgs)
 {
+    
     ReturnValue->Val->Integer = strftime(Param[0]->Val->Pointer, Param[1]->Val->Integer, Param[2]->Val->Pointer, Param[3]->Val->Pointer);
 }
 
